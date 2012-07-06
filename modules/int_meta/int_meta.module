@@ -1,0 +1,1052 @@
+<?php
+// $Id: int_meta.module,v 1.1.2.9 2009/01/24 21:52:21 fractile81 Exp $
+// int_meta.module - Provides functionality for modules to dynamically add Metatags.
+
+// Hook Implementations ///////////////////////////////////////////////////////
+
+/**
+ * Implementation of hook_perm();.
+ */
+function int_meta_perm() {
+	return array('administer integrated metatags');
+}
+
+/**
+ * Implementation of hook_theme();.
+ */
+function int_meta_theme() {
+	return array(
+		'int_meta_form_tags' => array(
+			'arguments' => array('form' => NULL),
+		),
+	);
+}
+
+/**
+ * Implementation of hook_help();.
+ */
+function int_meta_help($path, $arg) {
+  $output = '';
+  switch ($path) {
+    case 'admin/help#int_meta': {
+      $output .= '<p>' . t('') . '</p>';
+      $output .= '<p>' . t('See the <a href="@readme">README.txt</a> for this module for more information.', array('@readme' => url(drupal_get_path('module', 'int_meta') . '/README.txt'))) . '</p>';
+    } break;
+    case 'admin/content/int_meta': {
+      $output .= '<p>' . t('These settings are meant to configure inheritable Metatags available for other content types to use.  If these settings are set to "enabled", and a content type is configured to "Inherit default Metatags" (go to <a href="@admin">Administer > Content management > Content types</a>, edit a content type, then click the "Metatags" tab for this option), the Metatags set on this page will be included when the content type includes its own.  Note that although these are designated as "default" Metatags, they will only be used when inherited.', array('@admin' => url('admin/content/types'))) . '</p>';
+      $output .= '<p>' . t('You can add static Metatags using the "Manual/Static Metatag entry" field, or create dynamic tags in the "Dynamic Metatags" fieldset.  Manual/Static Metatags are meant to be tags that should always be displayed, and should have a fixed name/value.  Dynamic Metatags are meant to expose data from the node, including taxonomy and user information.  If the <a href="@token">Token module</a> is enabled, you can use tokens in the "Manual/Static" field for both the &lt;name&gt; and &lt;value&gt;.', array('@token' => url('http://www.drupal.org/project/token'))) . '</p>';
+      $output .= '<p>' . t('NOTE: All Metatags, static or dynamic, will have HTML tags automaticly stripped.  Next, any run of one or more newlines/carriage returns will be replaced with a single space.') . '</p>';
+    } break;
+    case 'admin/settings/int_meta': {
+      $output .= '<p>' . t('Using this form, you can configure if and how you want to cap the length of Metatags.  Individual settings are available for the "description" tag, "keywords" tag, and all other tags.') . '</p>';
+      $output .= '<p>' . t('To enable a cap, decide which type of tag you want to cap and select from the radio buttons whether you want to cap on the number of words or characters.  Then enter an integer greater than 0 into the "number to cap at" field.  To not have a cap for a particular type of tag, make sure this field is set to 0.') . '</p>';
+      $output .= '<p>' . t('In order to create a Metatag, go to <a href="@admin">Administer > Content management > Content types</a>, edit a content type, click the "Metatags" tab at the top of the page (on the same line as the highlighted "Edit" tab), and follow the instructions on that page.', array('@admin' => url('admin/content/types'))) . '</p>';
+    } break;
+  }
+  
+  // Match for the individual content type pages
+  if (empty($output) && preg_match('!admin\/content\/node\-type\/\w+\/metatags!', $path)) {
+    $output .= '<p>' . t('On this page you configure the Metatags you want associated with this specific content type.  The available settings for this page are the same as the <a href="@default">default Metatag settings</a> (used for creating inheritable Metatags across multiple content types), with the addition of a field for inheriting all of the default tags. Each content type has its own Metatag configuration page.', array('@default' => url('admin/content/int_meta')));
+    $output .= '<p>' . t('You can add static Metatags using the "Manual/Static Metatag entry" field, or create dynamic tags in the "Dynamic Metatags" fieldset.  Manual/Static Metatags are meant to be tags that should always be displayed, and should have a fixed name/value.  Dynamic Metatags are meant to expose data from the node, including taxonomy and user information.  If the <a href="@token">Token module</a> is enabled, you can use tokens in the "Manual/Static" field for both the &lt;name&gt; and &lt;value&gt;.', array('@token' => url('http://www.drupal.org/project/token'))) . '</p>';
+    $output .= '<p>' . t('NOTE: All Metatags, static or dynamic, will have HTML tags automaticly stripped.  Next, any run of one or more newlines/carriage returns will be replaced with a single space.') . '</p>';
+  }
+  
+  return $output;
+}
+
+/**
+ * Implementation of hook_menu();.
+ */
+function int_meta_menu() {
+	$items['int_meta/ahah'] = array(
+    'type' => MENU_CALLBACK,
+		'page callback' => 'int_meta_ahah',
+		'page arguments' => array(),
+		'access arguments' => array('administer integrated metatags'),
+	);
+  
+	$items['admin/content/int_meta'] = array(
+		'title' => 'Integrated Metatags',
+		'description' => 'Configure the default settings for Metatags.',
+		'page callback' => 'drupal_get_form',
+		'page arguments' => array('int_meta_type_form'),
+		'access arguments' => array('administer integrated metatags'),
+	);
+
+  $items['admin/settings/int_meta'] = array(
+    'title' => 'Integrated Metatags Settings',
+    'description' => 'Set global settings for Integrated Metatags.',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('int_meta_settings'),
+    'access arguments' => array('administer integrated metatags'),
+  );
+  
+	// Create a Metatags local task for each content type
+  foreach (node_get_types() as $type) {
+    $url = str_replace('_', '-', $type->type);
+    $items['admin/content/node-type/' . $url . '/metatags'] = array(
+      'title' => 'Metatags',
+      'type' => MENU_LOCAL_TASK,
+      'access arguments' => array('administer integrated metatags'),
+      'page callback' => 'drupal_get_form',
+      'page arguments' => array('int_meta_type_form', 3),
+    );
+  }
+	return $items;
+}
+
+/**
+  * Integrated Metatags configuration form.
+  */
+function int_meta_settings() {
+  $form = array();
+  
+  $form['desc'] = array(
+    '#type' => 'fieldset',
+    '#title' => t('Description Metatag'),
+    '#description' => t('Set a word or character limit on all "description" Metatags.  To use this, you must first create a Metatag with the name of "description".'),
+    '#collapsible' => 1,
+    '#collapsed' => 0,
+  );
+
+  $form['desc']['int_meta_desc_how'] = array(
+    '#type' => 'radios',
+    '#title' => t('Cap on words or characters'),
+    '#options' => array(
+      'words' => t('Words'),
+      'chars' => t('Characters'),
+    ),
+    '#default_value' => variable_get('int_meta_desc_how', 'chars'),
+  );
+
+  $form['desc']['int_meta_desc_cap'] = array(
+    '#type' => 'textfield',
+    '#title' => t('Enter a number to cap at'),
+    '#description' => t('Enter 0 to not have a cap.'),
+    '#default_value' => variable_get('int_meta_desc_cap', 0),
+  );
+
+  $form['keys'] = array(
+    '#type' => 'fieldset',
+    '#title' => t('Keywords Metatag'),
+    '#description' => t('Set a word or character limit on all "keywords" Metatags.  To use this, you must first create a Metatag with the name of "keywords".'),
+    '#collapsible' => 1,
+    '#collapsed' => 0,
+  );
+
+  $form['keys']['int_meta_keys_how'] = array(
+    '#type' => 'radios',
+    '#title' => t('Cap on words or characters'),
+    '#options' => array(
+      'words' => t('Words'),
+      'chars' => t('Characters'),
+    ),
+    '#default_value' => variable_get('int_meta_keys_how', 'chars'),
+  );
+
+  $form['keys']['int_meta_keys_cap'] = array(
+    '#type' => 'textfield',
+    '#title' => t('Enter a number to cap at'),
+    '#description' => t('Enter 0 to not have a cap.'),
+    '#default_value' => variable_get('int_meta_keys_cap', 0),
+  );
+
+  $form['others'] = array(
+    '#type' => 'fieldset',
+    '#title' => t('Other Metatags'),
+    '#description' => t('Set a word or character limit on all other Metatags.  All Metatags (except "description" and "keywords") will use this cap.'),
+    '#collapsible' => 1,
+    '#collapsed' => 0,
+  );
+
+  $form['others']['int_meta_other_how'] = array(
+    '#type' => 'radios',
+    '#title' => t('Cap on words or characters'),
+    '#options' => array(
+      'words' => t('Words'),
+      'chars' => t('Characters'),
+    ),
+    '#default_value' => variable_get('int_meta_other_how', 'chars'),
+  );
+
+  $form['others']['int_meta_other_cap'] = array(
+    '#type' => 'textfield',
+    '#title' => t('Enter a number to cap at'),
+    '#description' => t('Enter 0 to not have a cap.'),
+    '#default_value' => variable_get('int_meta_other_cap', 0),
+  );
+
+  return system_settings_form($form);
+}
+
+/**
+  * Validation handler for the settings form.
+  */
+function int_meta_settings_validate($form, &$form_state) {
+  // Verify all of the cap numbers are valid
+  $values = $form_state['values'];
+  if (!ctype_digit($values['int_meta_keys_cap']) || $values['int_meta_keys_cap'] < 0) {
+    form_set_error('int_meta_keys_cap', t('Please enter an integer greater than or equal to 0.'));
+  }
+  
+  if (!ctype_digit($values['int_meta_desc_cap']) || $values['int_meta_desc_cap'] < 0) {
+    form_set_error('int_meta_desc_cap', t('Please enter an integer greater than or equal to 0.'));
+  }
+  
+  if (!ctype_digit($values['int_meta_other_cap']) || $values['int_meta_other_cap'] < 0) {
+    form_set_error('int_meta_other_cap', t('Please enter an integer greater than or equal to 0.'));
+  }
+}
+
+/**
+ * Implementation of hook_nodeapi();.
+ */
+function int_meta_nodeapi(&$node, $op, $teaser=NULL, $fullpage=NULL) {
+  // Two step process: 1) on 'view', build and get Metatags; 2) on 'alter', render
+  if ($op == 'view') {
+    $info = int_meta_load_type($node->type);
+    
+    // Only process further if we're on a fullpage, or if teaser rendering is enabled
+    if (($fullpage || ($info->teasers && $teaser)) && $info->status) {
+      $tags = int_meta_load_tags($node->type);
+      // Make sure not to destroy anything that might already be there
+      if (isset($node->int_meta)) {
+        $node->int_meta = array_merge($node->int_meta, $tags);
+      } else {
+        $node->int_meta = $tags;
+      }
+      
+      // Allow modules to associate data with the fields
+      foreach(module_implements('int_meta') as $module) {
+        $func = $module . '_int_meta';
+        $func('load', $node);
+      }
+      
+      // Run static tags through Token
+      if (module_exists('token')) {
+        foreach ($node->int_meta as $key => $tag) {
+          if (!isset($tag->type)) {
+            $node->int_meta[$key]->name = token_replace($tag->field, 'node', $node);
+            if (!empty($tag->values)) {
+              foreach ($tag->values as $i => $value) {
+                $node->int_meta[$key]->values[$i] = token_replace($value, 'node', $node);
+              }
+            }
+          }
+        }
+      }
+    }
+  } elseif ($op == 'alter' && !empty($node->int_meta)) {
+    // Setup the Metatags to show later
+    int_meta_set_metatag($node->int_meta);
+  }
+}
+
+/**
+ * Implementation of hook_preprocess_page();
+ */
+function int_meta_preprocess_page(&$variables) {
+  $tags = int_meta_get_metatags();
+  
+  // Apply combination logic
+  $tags = int_meta_combine_tags($tags);
+  
+  int_meta_show_tags($tags);
+  $variables['head'] = drupal_get_html_head();
+}
+
+/**
+ * Implementation of hook_int_meta();.
+ */
+function int_meta_int_meta($op, &$arg) {
+	switch ($op) {
+		case 'load': {
+			if (!empty($arg->int_meta)) {
+				foreach ($arg->int_meta as $key => $tag) {
+					$arg->int_meta[$key]->values = array_merge($arg->int_meta[$key]->values, int_meta_base_data($tag, $arg));
+				}
+			}
+		}
+		case 'fields': return int_meta_base_fields();
+	}
+}
+
+// General Metatag CRUD Functions /////////////////////////////////////////////
+
+/**
+ * Displays all passed Metatags.
+ * @param $tag Either a Metatag object, or an array of Metatags.
+ */
+function int_meta_show_tags($tag) {
+	static $types = array();
+	if (is_array($tag)) {
+		// Cycle through each tag individually
+		foreach ($tag as $curr) {
+			int_meta_show_tags($curr);
+		}
+	} elseif ($tag->status) {
+		if (!isset($types[$tag->type])) {
+			$types[$tag->type] = int_meta_load_type($tag->type);
+		}
+		if (!empty($tag->values) || $types[$tag->type]->empty) {
+			if (!is_array($tag->values)) {
+				$tag->values = array($tag->values);
+			}
+      
+      // Cleanup the data so we don't accidentally break anything
+      $name = check_plain(strip_tags(!empty($tag->name) ? $tag->name : $tag->field));
+      foreach ($tag->values as $key => $value) {
+        $value = check_plain(preg_replace('/[\n\r]+/', ' ', strip_tags(trim($value))));
+        if ($tag->combine) {
+          $tag->values[$key] = $value;
+        } else {
+          $value = int_meta_trim($name, $value);
+          drupal_set_html_head('<meta name="' . $name . '" content="' . $value . '" />');
+        }
+      }
+      
+      if ($tag->combine) {
+        $value = int_meta_trim($name, implode(', ', array_unique($tag->values)));
+        drupal_set_html_head('<meta name="' . $name . '" content="' . $value . '" />');
+      }
+		}
+	}
+}
+
+/**
+ * Load all Metatags for this node-type.
+ * @param $type The node-type to load off of.
+ * @return Returns an array of Metatags.
+ */
+function int_meta_load_tags($type='') {
+	$ret = $args = array();
+	$info = int_meta_load_type($type);
+	$parent = NULL;
+  
+  // Form the query to load the tags
+	$query = " FROM {int_meta_fields} WHERE ";
+  
+  $types = " type = '%s'";
+  if ($info->inherit) {
+    $parent = int_meta_load_type();
+    if ($parent->status) {
+      $types = " (type = '%s' OR type = '')";
+    }
+  }
+	
+  $query .= $types;
+	$args[] = $type;
+	
+	$query .= " ORDER BY type ASC, field ASC, name ASC";
+	$count = "SELECT COUNT(*)" . $query;
+	if (db_result(db_query($count, $args)) > 0) {
+		$query = "SELECT field, type, COALESCE(name, field) AS name, combine, status" . $query;
+		$result = db_query($query, $args);
+		while ($curr = db_fetch_array($result)) {
+			$curr['values'] = array();
+			$ret[] = (object)$curr;
+		}
+	}
+  
+	// Add any static tags
+	if (!empty($info->static)) {
+		$ret = array_merge($ret, _int_meta_parse_static($info->static));
+	}
+  
+	// Add any inherited static tags
+	if (!is_null($parent) && $parent->status && !empty($parent->static)) {
+		$ret = array_merge($ret, _int_meta_parse_static($parent->static));
+	}
+  
+	return $ret;
+}
+
+/**
+ * Saves an individual Metatag.
+ * @param $field Fieldname of the Metatag.
+ * @param $type Node-type of the Metatag.
+ * @param $name How to name the field.
+ * @param $status Set to 1 for enabled, 0 for disabled.  Defaults to 1.
+ */
+function int_meta_save_tag($field, $type='', $name='', $combine=0, $status=1) {
+	$tag = (object)array(
+		'field' => $field,
+		'type' => $type,
+		'name' => $name,
+		'status' => $status,
+		'combine' => $combine,
+	);
+	db_query("DELETE FROM {int_meta_fields} WHERE field = '%s' AND type = '%s' AND name = '%s'", $field, $type, $name);
+	drupal_write_record('int_meta_fields', $tag);
+}
+
+/**
+ * Saves an array of Metatags.
+ * @param $tags An array of tags, as loaded from int_meta_load_tags.
+ * @param $type The node-type these Metatags should be saved for.  Defaults to NULL.
+ */
+function int_meta_save_tags($tags) {
+	if (is_array($tags)) {
+		foreach ($tags as $tag) {
+			int_meta_save_tag($tag->field, $tag->type, $tag->name, $tag->combine, $tag->status);
+		}
+	}
+}
+
+/**
+ * Deletes a single field/name key-pair.
+ * @param $field The field to remove.
+ * @param $type The node-type this field is associated with.
+ * @param $name The named value of the field, if any.
+ */
+function int_meta_delete_tag($field, $type='', $name='') {
+	db_query("DELETE FROM {int_meta_fields} WHERE field = '%s' AND type = '%s' AND name = '%s'", $field, $type, $name);
+}
+
+/**
+ * Deletes an array of Metatags.
+ * @param $tags An array of Metatags, as loaded from int_meta_load_tags.
+ */
+function int_meta_delete_tags($tags) {
+	if (is_array($tags)) {
+		foreach ($tags as $tag) {
+			int_meta_delete_tag($tag->field, $tag->type, $tag->name);
+		}
+	}
+}
+
+// General Content Type CRUD Functions ////////////////////////////////////////
+
+/**
+ * Loads the configuration settings for the passed Content Type.
+ * @param $type The Content Type to load information on.
+ * @return Returns an object describing the configuration of the Content Type.
+ */
+function int_meta_load_type($type='') {
+	$default = (object)array(
+		'type' => $type,
+		'status' => 0,
+		'empty' => 0,
+		'inherit' => 0,
+		'static' => '',
+    'teasers' => 0,
+	);
+  
+  $target = 'int_meta_info';
+  if (!empty($type)) {
+    $target .= '_' . $type;
+  }
+  return variable_get($target, $default);
+}
+
+/**
+ * Saves the configuration settings for the passed Content Type.
+ * @param $type The Content Type being saved.
+ */
+function int_meta_save_type($type, $status=1, $empty=1, $inherit=1, $static='', $teasers=0) {
+	if (empty($type)) {
+		$type = '';
+  }
+  
+	$data = (object)array(
+		'type' => $type,
+		'status' => $status,
+		'empty' => $empty,
+		'inherit' => $inherit,
+		'static' => $static,
+    'teasers' => $teasers,
+	);
+  
+  $target = 'int_meta_info';
+  if (!empty($type)) {
+    $target .= '_' . $type;
+  }
+  variable_set($target, $data);
+}
+
+/**
+ * Deletes configuration settings for the specified Content Type.
+ * @param $type The Content Type being deleted.
+ */
+function int_meta_delete_type($type) {
+  $target = 'int_meta_info';
+  if (!empty($type)) {
+    $target .= '_' . $type;
+  }
+	
+  variable_del($target);
+}
+
+// Form Functions /////////////////////////////////////////////////////////////
+
+/**
+ * Creates a node type-specific settings form.
+ * @param $form_state Standard form_state argument.
+ * @param $type The desired node type to build a settings form for, or NULL for the default settings.
+ * @return Retutrns a complete form with default values already entered.
+ */
+function int_meta_type_form(&$form_state, $type='') {
+  // If this is coming from the URL, we need to change out all - for _
+  $type = str_replace('-', '_', $type);
+
+	$info = int_meta_load_type($type);
+	$form = array(
+		'#cache' => TRUE,
+		'type' => array('#type' => 'hidden', '#default_value' => $info->type),
+	);
+
+	$desc = 'Check to enable inherited Metatags.  When enabled, any content types set to inherit Metatags will include those on this page.';
+	if (!empty($info->type)) {
+		$desc = 'Check to enable Metatags for this content type.';
+	}
+	$form['enabled'] = array(
+		'#type' => 'checkbox',
+		'#title' => t('Enable'),
+		'#description' => t($desc),
+		'#default_value' => $info->status,
+	);
+  
+  if (!empty($info->type)) {
+		$form['inherit'] = array(
+			'#type' => 'checkbox',
+			'#title' => t('Inherit default Metatags?'),
+			'#description' => t('Check to inherit the default Metatags, which are configured at <a href="@admin">Administer > Content management > Integrated Metatags</a>.', array('@admin' => url('admin/content/int_meta'))),
+			'#default_value' => $info->inherit,
+		);
+	}
+  
+	$form['empty'] = array(
+		'#type' => 'checkbox',
+		'#title' => t('Show empty Metatags?'),
+		'#description' => t('Check to include empty Metatags.  This will not apply to inherited Metatags.'),
+		'#default_value' => $info->empty,
+	);
+  
+  $form['teasers'] = array(
+    '#type' => 'checkbox',
+    '#title' => t('Display Metatags with teasers?'),
+    '#description' => t('By default, Metatags will only display on a node\'s full-page view.  When this box is checked, Metatags will also be shown when a node is rendered as a teaser.  This setting will not inherit.'),
+    '#default_value' => $info->teasers,
+  );
+  
+	$form['static'] = array(
+		'#type' => 'textarea',
+		'#rows' => 5,
+		'#title' => t('Manual/Static Metatag entry'),
+		'#description' => t('If you need to define any static Metatags for this type, enter them here in the form &lt;name&gt;|&lt;value&gt;, one per line.'),
+		'#default_value' => $info->static,
+	);
+  
+  // If the Token module is enabled, allow support for that in the static Metatags
+  if (module_exists('token')) {
+    $form['static']['#description'] .= ' ' . t('You may also use any of the currently supported tokens found in the "Available Tokens" fieldset below (e.g. [author-name]).');
+    
+    $form['tokens'] = array(
+      '#type' => 'fieldset',
+      '#title' => t('Available Tokens'),
+      '#collapsible' => 1,
+      '#collapsed' => 1,
+      'list' => array(
+        '#type' => 'markup',
+        '#value' => theme('token_help', 'node'),
+      ),
+    );
+  }
+  
+	$form['metatags'] = array(
+		'#type' => 'fieldset',
+		'#title' => t('Dynamic Metatags'),
+		'#description' => t('To add a new Dynamic Metatag, use the last row (has the "Add" button) to: 1) combine it with other like-named Metatags, 2) select from the dropdown what data to use, and 3) give the Metatag a name.  When editing a Dynamic Metatag (any rows that are not the bottom-most), you will be able to enabled/disable it, set it to combine, mark it to be deleted once the form is saved, or change its name.  Once a Metatag has been created, you cannot change the data source for it.'),
+		'#collapsible' => 1,
+		'#collapsed' => 0,
+	);
+  
+	// Display all tags, allowing appropriate tags to be edited from here
+	$tags = int_meta_load_tags($info->type);
+	$sorted = array('defaults' => array(), 'local' => array());
+	foreach ($tags as $tag) {
+		if (isset($tag->type)) {
+			if (empty($tag->type) && !empty($info->type)) {
+				if ($tag->status) {
+					// These can't be directly edited, so prepare the array to be displayed as a string
+					$name = $tag->field;
+					if (!empty($tag->name)) {
+						$name = $tag->name . '&lt;' . $name . '&gt;';
+					}
+					$sorted['defaults'][] = $name;
+				}
+			} else {
+				$sorted['local'][] = $tag;
+			}
+		}
+	}
+	if (!empty($sorted['defaults'])) {
+		$form['metatags']['defaults'] = array(
+			'#value' => '<p>' . t('The following Metatags are inherited from the <a href="@default">default configuration</a>: ', array('@default' => url('admin/content/int_meta'))) . implode(', ', $sorted['defaults']) . '</p>',
+		);
+	}
+	$form['metatags']['local'] = array('#theme' => 'int_meta_form_tags', '#tree'=> TRUE, '#prefix' => '<div id="int_meta-wrapper">', '#suffix' => '</div>');
+	$form['metatags']['local'] += _int_meta_tags_form($type, $sorted['local']);
+	$form['submit'] = array('#type' => 'submit', '#value' => 'Save');
+	return $form;
+}
+
+/**
+ *
+ * Interface for the AHAH management of Metatags.
+ */
+function int_meta_ahah() {
+	// Load the form from cache
+	$cache = cache_get('form_' . $_POST['form_build_id'], 'cache_form');
+	$form = $cache->data;
+	$form_state = array('values' => $_POST);
+	$tags = array();
+	$check = array();
+	$newest = count($_POST['local']);
+	foreach ($_POST['local'] as $key => $data) {
+		if (is_numeric($key)) {
+			// Generate the tags so we can generate the new form elements
+      $tag = new stdClass();
+      $tag->field = check_plain($data['field']);
+      $tag->name = check_plain($data['name']);
+      $tag->status = ($key == $newest-1) ? 1 : (int)isset($data['status']);
+      $tag->combine = (int)isset($data['combine']);
+      $tag->remove = (int)isset($data['remove']);
+      
+			if (in_array($data['field'] . ':' . $data['name'], $check)) {
+				if ($key == $newest - 1) {
+					$tags['new'] = $tag;
+					form_set_error('local][' . $key . '][name', t('The name for this field must be unique.  Please specify a different name or change the field.'));
+				} else {
+					$tags[$key] = $tag;
+					form_set_error('local][' . $key . '][name', t('This name has already been specified by another field for this type.  Please change or remove it or this form will not saved.'));
+				}
+			} else {
+				$tags[$key] = $tag;
+				$check[] = $data['field'] . ':' . $data['name'];
+			}
+			unset($cache->data['metatags']['local'][$key]);
+		}
+	}
+	$form = _int_meta_tags_form($form_state['values']['type'], $tags);
+	$cache->data['metatags']['local'] = array_merge($cache->data['metatags']['local'], $form);
+	cache_set('form_'. $_POST['form_build_id'], $cache->data, 'cache_form', $cache->expire);
+	$form = $cache->data['metatags'];
+	$form += array(
+		'#post' => $_POST,
+		'#programmed' => FALSE,
+		'#tree' => FALSE,
+		'#parents' => array(),
+	);
+	drupal_alter('form', $form, array(), 'int_meta_ahah');
+	$form_state['submitted'] = FALSE;
+	$form = form_builder('int_meta_ahah', $form, $form_state);
+	$output = theme('status_messages') . drupal_render($form['local']);
+	print drupal_to_js(array('status' => TRUE, 'data' => $output));
+	
+	// Kill Devel if it's installed
+	$GLOBALS['devel_shutdown'] = TRUE;
+	exit;
+}
+
+/**
+ * The Metatag-listing subform.
+ * @param $tags A listing of tags that should be displayed
+ */
+function _int_meta_tags_form($type, $tags) {
+	$supported = int_meta_supported_fields($type);
+	$supported = _int_meta_array_combine($supported, $supported);
+	if (isset($tags['new'])) {
+		$new = $tags['new'];
+		unset($tags['new']);
+	} else {
+		$new = (object)array(
+			'field' => '',
+			'name' => '',
+			'combine' => 0,
+		);
+	}
+	$form = array();
+	foreach ($tags as $key => $tag) {
+		$form[$key] = array('#tree' => TRUE);
+		$form[$key]['status'] = array('#type' => 'checkbox', '#default_value' => $tag->status);
+    $form[$key]['combine'] = array('#type' => 'checkbox', '#default_value' => $tag->combine);
+		$form[$key]['remove'] = array('#type' => 'checkbox', '#default_value' => $tag->remove);
+		$form[$key]['field'] = array('#type' => 'hidden', '#default_value' => $tag->field, '#prefix' => $tag->field);
+		$form[$key]['name'] = array('#type' => 'textfield', '#default_value' => $tag->name);
+	}
+	// Add the entry fields
+	$key = count($tags);
+	$form[$key]['status'] = array(
+		'#name' => 'status',
+		'#id' => 'edit-local-status',
+		'#type' => 'submit',
+		'#value' => t('Add'),
+		'#ahah' => array(
+			'path' => 'int_meta/ahah',
+			'wrapper' => 'int_meta-wrapper',
+		),
+	);
+	$form[$key]['field'] = array('#type' => 'select', '#options' => $supported, '#default_value' => $new->field);
+	$form[$key]['name'] = array('#type' => 'textfield', '#default_value' => $new->name);
+	$form[$key]['combine'] = array('#type' => 'checkbox', '#default_value' => $new->combine);
+	$form[$key]['remove'] = array('#value' => '');
+	return $form;
+}
+
+/**
+ * Validate handler for the int_meta_type_form.
+ */
+function int_meta_type_form_validate($form, &$form_state) {
+	$values = $form_state['values'];
+	array_pop($values['local']);
+	$check = array();
+	if (count($values['local'])) {
+		foreach ($values['local'] as $key => $data) {
+			if (!$data['remove']) {
+				if (in_array($data['field'] . ':' . $data['name'], $check)) {
+					if ($key == $newest - 1) {
+						form_set_error('local][' . $key . '][name', t('The name for this field must be unique.  Please specify a different name or change the field.'));
+					} else {
+						form_set_error('local][' . $key . '][name', t('This name has already been specified by another field for this type.  Please change or remove it or this form will not saved.'));
+					}
+				} else {
+					$check[] = $data['field'] . ':' . $data['name'];
+				}
+			}
+		}
+	}
+}
+
+/**
+ * Submit handler for the int_meta_type_form.
+ */
+function int_meta_type_form_submit($form, &$form_state) {
+	$values = $form_state['values'];
+	$type = $values['type'];
+  
+	// Setup the type and clear the old tags for this type
+	if (empty($type)) {
+		$type = '';
+	}
+	db_query("DELETE FROM {int_meta_fields} WHERE type = '%s'", $type);
+  
+	// Save the type
+	int_meta_save_type($type, $values['enabled'], $values['empty'], $values['inherit'], $values['static'], $values['teasers']);
+  
+	// Save the tags
+	array_pop($values['local']);
+	if (count($values['local'])) {
+		foreach ($values['local'] as $key => $data) {
+			if (!$data['remove']) {
+				int_meta_save_tag($data['field'], $type, $data['name'], (int)$data['combine'], (int)$data['status']);
+			}
+		}
+	}
+  
+  if (empty($type)) {
+    drupal_set_message(t('The global Integrated Metatag settings have been saved.'));
+  } else {
+    $content_type = node_get_types('type', $type);
+    drupal_set_message(t('The Integrated Metatag settings for the %type content type have been saved.', array('%type' => $content_type->name)));
+  }
+}
+
+/**
+ * Renders a list of form-level Metatags.
+ * @param $form The form information to render.
+ */
+function theme_int_meta_form_tags($form) {
+	$header = array(t('Enabled'), t('Combine'), t('Delete'), t('Data'), t('Name'));
+	$rows = array();
+	foreach (element_children($form) as $key) {
+		$row = array();
+		$row[] = drupal_render($form[$key]['status']);
+    $row[] = drupal_render($form[$key]['combine']);
+		$row[] = drupal_render($form[$key]['remove']);
+		$row[] = drupal_render($form[$key]['field']);
+		$row[] = drupal_render($form[$key]['name']);
+		$rows[] = $row;
+	}
+	$output = theme('table', $header, $rows);
+	$output .= drupal_render($form);
+	return $output;
+}
+
+// Helper Functions ///////////////////////////////////////////////////////////
+/**
+ * Applies combinational logic as needed over the tags.
+ * @param $tags Array of tags to combine.
+ * @return Returns an array of tags after applying the combination logic.
+ */
+function int_meta_combine_tags($tags) {
+	$combines = array();
+	// Go through the tags and find those that should be combined
+	foreach ($tags as $key => $tag) {
+		if ($tag->combine) {
+			// Combine based on name
+			$name = !empty($tag->name) ? $tag->name : $tag->field;
+			$values = $tag->values;
+			if (!isset($combines[$name])) {
+				$combines[$name] = &$tags[$key]->values;
+			} else {
+				unset($tags[$key]);
+				$combines[$name] = array_merge($combines[$name], $values);
+			}
+		}
+	}
+	
+	return $tags;
+}
+
+/**
+ * Loads include files and determines what fields are supported by default.
+ * @param $type Speficy the type to load fields for.  Optional.
+ */
+function int_meta_supported_fields($type='') {
+	static $supported = array();
+	if (empty($type)) {
+		$type = '';
+	}
+	if (!isset($supported[$type])) {
+		// Allow modules to add their own fields
+		$supported[$type] = array();
+		foreach(module_implements('int_meta') as $module) {
+      $func = $module . '_int_meta';
+			$supported[$type] = array_merge($supported[$type], $func('fields', $type));
+		}
+		sort($supported[$type]);
+	}
+	return $supported[$type];
+}
+
+/**
+ * Parses out a static tag field.
+ * @param $string The text that will be parsed.
+ * @return Returns an array of tags as loaded by int_meta_load_tags.
+ */
+function _int_meta_parse_static($string) {
+	$ret = array();
+	$string = str_replace(array("\r\n", "\n\r", "\n", "\r"), "\n", $string);
+	$parts = explode("\n", $string);
+	foreach ($parts as $line) {
+		$split = explode('|', $line, 2);
+		$ret[] = (object)array(
+			'field' => $split[0],
+			'status' => 1,
+			'values' => array($split[1]),
+      'combine' => 1,
+		);
+	}
+	return $ret;
+}
+
+/**
+ * Returns the base supported fields by this module.
+ * @return Returns an indexed array of the base-supported fields.
+ */
+function int_meta_base_fields() {
+	static $fields = array();
+	
+	if (empty($fields)) {
+		$fields = array(
+			'node.nid',
+			'node.vid',
+			'node.uid',
+			'node.title',
+      'node.teaser',
+			'node.type',
+			'node.created',
+			'node.changed',
+			'node.status',
+			'node.sticky',
+			'node.comment',
+			'node.promote',
+			'user.uid',
+			'user.name',
+			'user.mail',
+			'user.signature',
+		);
+		
+		// Figure out the taxonomy information
+		if (module_exists('taxonomy')) {
+			$vocabs = taxonomy_get_vocabularies();
+			
+			$pattern = array(
+				'term.*.tid',
+				'term.*.vid',
+				'term.*.name',
+				'term.*.vocab',
+			);
+			$fields = array_merge($fields, $pattern);
+			
+			$tmp = array();
+			foreach ($vocabs as $vocab) {
+				foreach ($pattern as $type) {
+					$tmp[] = str_replace('.*.', '.' . $vocab->vid . '.', $type);
+				}
+			}
+			
+			$fields = array_merge($fields, $tmp);
+		}
+	}
+	
+	return $fields;
+}
+
+/**
+ * Associates values from the base fields.
+ * @param $tag The tag object to check on.
+ * @param $node Node information to use.
+ * @return Returns associated values, in an array, if the tag is supported.
+ */
+function int_meta_base_data($tag, $node) {
+	static $users = array();
+	static $terms = array();	// Contains parsed taxonomy information on a per-node basis
+	static $vocabs = NULL;
+	$ret = array();
+	$fields = int_meta_base_fields();
+	if (in_array($tag->field, $fields)) {
+		$parts = explode('.', $tag->field, 2);
+		switch ($parts[0]) {
+			case 'node': {
+				if (isset($node->{$parts[1]})) {
+					$ret[] = $node->{$parts[1]};
+				}
+			} break;
+			case 'user': {
+				if (!isset($users[$node->uid])) {
+					$users[$node->uid] = user_load($node->uid);
+				}
+				
+				if (isset($users[$node->uid]->{$parts[1]})) {
+					$ret[] = $users[$node->uid]->{$parts[1]};
+				}
+			} break;
+			case 'term': {
+				if (!empty($node->taxonomy)) {
+					$parts = explode('.', $parts[1], 2);
+					
+					// Parse the node's taxonomy array if we haven't already
+					if (!isset($terms[$node->nid])) {
+						// Set the vocab information here
+						if (is_null($vocabs)) {
+							$tmp = taxonomy_get_vocabularies();
+							$vocabs = array();
+							foreach ($tmp as $vocab) {
+								$vocabs[$vocab->vid] = $vocab;
+							}
+						}
+						
+						foreach ($node->taxonomy as $term) {
+							$term->vocab = $vocabs[$term->vid]->name;
+							$terms[$node->nid][$term->vid][] = $term;
+						}
+					}
+					
+					if ($parts[0] == '*') {
+						foreach ($terms[$node->nid] as $vocab) {
+							foreach ($vocab as $term) {
+								$ret[] = $term->{$parts[1]};
+							}
+						}
+					} elseif (!empty($terms[$node->nid][$parts[0]])) {
+						foreach ($terms[$node->nid][$parts[0]] as $term) {
+							$ret[] = $term->{$parts[1]};
+						}
+					}
+				}
+			} break;
+		}
+	}
+	
+	return $ret;
+}
+
+/**
+ * In case < PHP 5 is being used, duplicate the array_combine functionality.
+ * @param $keys The keys for the returned array.
+ * @param $values The values for the returned array.
+ * @return Returns an array, using $keys for the keys and $values for the values.
+ */
+function _int_meta_array_combine($keys, $values) {
+  $ret = array();
+  foreach ($keys as $key) {
+    $value = array_shift($values);
+    $ret[$key] = $value;
+  }
+  
+  return $ret;
+}
+
+/**
+ * Set or retrieve Metatags to display.
+ * @param $tag Either a single Metatag or an array of Metatags to add.
+ * @param $reset Whether to reset the static cache of Metatags in the function.  Defaults to FALSE.
+ * @return Returns all Metatags that have been added so far.
+ * @see int_meta_get_metatags
+ */
+function int_meta_set_metatag($tag, $reset=FALSE) {
+  static $tags = array();
+  
+  if (!is_null($tag)) {
+    if (is_array($tag) && !array_key_exists('type', $tag)) {
+      $tags = array_merge($tags, $tag);
+    } else {
+      $tags[] = $tag;
+    }
+  }
+  
+  $ret = $tags;
+  if ($reset) {
+    $tags = array();
+  }
+  
+  return $ret;
+}
+
+/**
+ * Fetch all of the Metatags we have queued up.
+ * @param $reset Whether to reset the static cache of Metatags in the function.  Defaults to TRUE.
+ * @return Returns an array of Metatags for use.
+ */
+function int_meta_get_metatags($reset=TRUE) {
+  return int_meta_set_metatag(NULL, $reset);
+}
+
+/**
+  * Trims up the value of a Metatag based on the name of the tag and the current settings.
+  * @param $name The name of the Metatag.
+  * @param $value The value of the Metatag to trim.
+  * @return Returns a trimmed string value.
+  */
+function int_meta_trim($name, $value) {
+  // Figure out the base name for the variables we want to use
+  switch ($name) {
+    case 'keywords': $key = 'int_meta_keys_'; break;
+    case 'description': $key = 'int_meta_desc_'; break;
+    default: $key = 'int_meta_other_';
+  }
+
+  // Trim the value down, if needed
+  $cap = variable_get($key . 'cap', 0);
+  if (!empty($value) && $cap > 0) {
+    if (variable_get($key . 'how', 'chars') == 'chars') {
+      // Simple substring should work just fine
+      $value = substr($value, 0, $cap);
+    } else {
+      // Get the word count and trim off any values we don't want to use
+      $words = str_word_count($value, 2);
+      $parts = array_keys($words);
+      array_splice($parts, $cap);
+      
+      // We only need to trim the value if the array counts differ
+      if (count($words) != count($parts)) {
+        $last = array_pop($parts);
+        $value = substr($value, 0, $last + strlen($words[$last]));
+      }
+    }
+  }
+  
+  return $value;
+}

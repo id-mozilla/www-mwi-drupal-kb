@@ -1,0 +1,23 @@
+name = fb_fbml
+description = Use on Facebook FBML canvas pages only.
+core = 6.x
+engine = phptemplate
+
+regions[admin] = admin sidebar
+regions[header] = canvas header
+regions[preface_first] = canvas preface first
+regions[preface_middle] = canvas preface middle
+regions[preface_last] = canvas preface last
+regions[content_top] = content top
+regions[content_footer] = content footer
+regions[right] = canvas right
+regions[canvas_footer] = canvas footer
+regions[iframe_footer] = iframe footer
+
+
+; Information added by drupal.org packaging script on 2010-02-03
+version = "6.x-2.0-beta2"
+core = "6.x"
+project = "fb"
+datestamp = "1265186106"
+

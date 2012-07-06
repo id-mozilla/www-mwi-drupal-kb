@@ -1,0 +1,13 @@
+name = Drupal for Facebook Views
+description = Provides features specific to Views module for Facebook Apps.
+package= Drupal for Facebook - optional
+core = 6.x
+dependencies[] = fb
+dependencies[] = views
+
+; Information added by drupal.org packaging script on 2010-02-03
+version = "6.x-2.0-beta2"
+core = "6.x"
+project = "fb"
+datestamp = "1265186106"
+

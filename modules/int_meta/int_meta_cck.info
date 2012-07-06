@@ -1,0 +1,13 @@
+; $Id: int_meta_cck.info,v 1.1.2.4 2008/09/03 02:52:39 fractile81 Exp $
+name = Integrated Metatags - CCK
+description = Adds Integrated Metatag functionality to CCK types and fields.
+core = 6.x
+version = VERSION
+dependencies[] = int_meta
+dependencies[] = content
+; Information added by drupal.org packaging script on 2009-01-24
+version = "6.x-1.0-beta7"
+core = "6.x"
+project = "int_meta"
+datestamp = "1232834434"
+

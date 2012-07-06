@@ -1,0 +1,123 @@
+<?php
+// $Id: int_meta.install,v 1.1.2.8 2009/01/24 21:52:21 fractile81 Exp $
+// int_meta.install - Install file to create the needed schemas.
+
+/**
+ * Implementation of hook_install();.
+ */
+function int_meta_install() {
+  drupal_install_schema('int_meta');
+}
+
+/**
+ * Implementation of hook_uninstall();.
+ */
+function int_meta_uninstall() {
+  drupal_uninstall_schema('int_meta');
+}
+
+/**
+ * Implementation of hook_schema();.
+ */
+function int_meta_schema() {
+  $schema['int_meta_fields'] = array(
+    'description' => t('Stores all of the dynamic Metatags for a site.'),
+    'fields' => array(
+      'field' => array(
+        'description' => t('Represents the value selected in the dropdown when creating a dynamic Metatag.'),
+        'type' => 'varchar',
+        'length' => 128,
+        'not null' => TRUE,
+        'default' => '',
+      ),
+      'type' => array(
+        'description' => t('The node type this field should be applied to.  Blank means it belongs to the global settings.'),
+        'type' => 'varchar',
+        'length' => 32,
+        'not null' => TRUE,
+        'default' => '',
+      ),
+      'name'		=> array(
+        'description' => t('The display name of the field when rendered for the client.'),
+        'type' => 'varchar',
+        'length' => 128,
+        'not null' => TRUE,
+        'default' => '',
+      ),
+      'combine'	=> array(
+        'description' => t('Whether to combine this value with other like-named fields when rendered.'),
+        'type' => 'int',
+        'size' => 'tiny',
+        'not null' => TRUE,
+        'default' => 0,
+      ),
+      'status'	=> array(
+        'description' => t('Whether this field is enabled or not.  Only enabled fields are rendered for the client.'),
+        'type' => 'int',
+        'size' => 'tiny',
+        'not null' => TRUE,
+        'default' => 1,
+      ),
+    ),
+    'primary key' => array('field', 'type', 'name'),
+  );
+  
+  return $schema;
+}
+
+/**
+ * Update to add the 'combine' field for the first dev and beta versions.
+ */
+function int_meta_update_6000() {
+  $ret = array();
+  
+  if (!db_column_exists('int_meta_fields', 'combine')) {
+    db_add_column($ret, 'int_meta_fields', 'combine', 'int', array('size' => 'tiny', 'not null' => TRUE, 'default' => 0));
+  }
+  
+  return $ret;
+}
+
+/**
+ * This update has been deprecated in favor of the following update.
+ */
+function int_meta_update_6001() {
+  $ret = array();
+  
+  return $ret;
+}
+
+/**
+ * Transfers previous settings and then drops the old int_meta_types table.
+ */
+function int_meta_update_6002() {
+  $ret = array();
+  
+  if (db_table_exists('int_meta_types')) {
+    if (db_result(db_query("SELECT COUNT(*) FROM {int_meta_types}")) > 0) {
+      $query = "SELECT type, status, empty, inherit, static FROM {int_meta_types}";
+      $result = db_query($query);
+      while ($curr = db_fetch_array($result)) {
+        call_user_func_array('int_meta_save_type', $curr);
+      }
+    }
+    
+    db_drop_table($ret, 'int_meta_types');
+  }
+  
+  return $ret;
+}
+
+/**
+ * Fix a schema mistmatch as pointed out by the Schema module.
+ */
+function int_meta_update_6003() {
+  $ret = array();
+
+  db_drop_primary_key($ret, 'int_meta_fields');
+  db_change_field($ret, 'int_meta_fields', 'field', 'field', array('type' => 'varchar', 'length' => 128, 'not null' => TRUE, 'default' => ''));
+  db_change_field($ret, 'int_meta_fields', 'type', 'type', array('type' => 'varchar', 'length' => 32, 'not null' => TRUE, 'default' => ''));
+  db_change_field($ret, 'int_meta_fields', 'name', 'name', array('type' => 'varchar', 'length' => 128, 'not null' => TRUE, 'default' => ''), array('primary key' => array('field', 'type', 'name')));
+  
+  return $ret;
+}

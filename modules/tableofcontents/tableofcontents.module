@@ -1,0 +1,159 @@
+<?php
+// $Id: tableofcontents.module,v 1.2.4.2.2.2.2.13.2.8 2009/07/20 06:01:31 alexiswilke Exp $
+
+/**
+ * @file
+ * This is a filter module to generate a collapsible jquery enabled mediawiki
+ * style table of contents based on <h[1-6]> tags. Transforms header tags into
+ * named anchors.
+ *
+ * It is a complete rewrite of the original non-jquery enabled tableofcontents
+ * filter module as follows:
+ *   +added jquery to make ToC collapsible
+ *   +preserves attributes on the header tags
+ *   +checks for existing ID on headers and uses that if found (if none,
+ *    creates one)
+ *   +extends the minimum header level to 1
+ *   +header conversion is case insensitive
+ *   +made the regex match for options on the <!--tableofcontents-->
+ *    marker tolerant of spaces
+ *   +replaced the comment with [tag ...]
+ *   +added a more explanatory error message for invalid options & concatenated
+ *    it into one string to prevent duplicates from being displayed
+ *   +added several divs to make ToC themable via CSS
+ *   +provided basic CSS
+ */
+
+/**
+ * Implementation of hook_init()
+ *
+ * We load the JS/CSS files here so we can cache the filter results.
+ */
+function tableofcontents_init() {
+  $path = drupal_get_path('module', 'tableofcontents');
+  drupal_add_js($path . '/jquery.scrollTo-min.js');
+  drupal_add_js($path . '/jquery.localscroll-min.js');
+  drupal_add_js($path . '/tableofcontents.js');
+  drupal_add_css($path . '/tableofcontents.css');
+}
+
+/**
+ * Implementation of hook_help().
+ */
+function tableofcontents_help($section) {
+  switch ($section) {
+    case 'admin/modules#description':
+      return t('A module to create a table of contents based on HTML header tags. Changes headers to anchors for processing so it may be incompatible with other filters that process header tags. It does use existing IDs on the header tags if already present and only operates on header levels 1 - 6.');
+
+  }
+}
+
+/**
+ * Implementation of hook_filter_tips().
+ */
+function tableofcontents_filter_tips($delta, $format, $long = FALSE) {
+  $override = variable_get('tableofcontents_allow_override_' . $format, TRUE);
+
+  if ($long) {
+    if ($override) {
+      return t('Every instance of "[toc ...]" in the input text will be replaced with a collapsible mediawiki-style table of contents. Accepts options for title, list style, minimum heading level, and maximum heading level, and attachments as follows: [toc list: ol; title: Table of Contents; minlevel: 2; maxlevel: 3; attachments: yes;]. All arguments are optional.');
+    }
+    else {
+      return t('Every instance of "[toc ...]" in the input text will be replaced with a collapsible mediawiki-style table of contents.');
+    }
+  }
+  else {
+    if ($override) {
+      return t('Use [toc list: ol; title: Table of Contents; minlevel: 2; maxlevel: 3; attachments: yes;] to insert a mediawiki style collapsible table of contents. All the arguments are optional.');
+    }
+    else {
+      return t('Use [toc ...] to insert a mediawiki style collapsible table of contents.');
+    }
+  }
+}
+
+/**
+ * Implementation of hook_filter().
+ */
+function tableofcontents_filter($op, $delta = 0, $format = -1, $text = '') {
+  if ($op == 'list') {
+    return array(
+      0 => t('Table of contents')
+    );
+  }
+
+  switch ($op) {
+  case 'description':
+    return t('Inserts a table of contents in place of [toc ...] tags.');
+
+  case 'no cache': // allow caching
+    return FALSE;
+
+  case 'settings':
+    module_load_include('admin.inc', 'tableofcontents');
+    return _tableofcontents_settings($format);
+
+  case 'prepare':
+    module_load_include('pages.inc', 'tableofcontents');
+    return _tableofcontents_prepare($delta, $format, $text);
+
+  case 'process':
+    // NOTE: we cannot test for a [toc:...] and skip if none
+    //       because the user could have the auto-toc turned on.
+    module_load_include('pages.inc', 'tableofcontents');
+    return _tableofcontents_process($delta, $format, $text);
+
+  }
+}
+
+
+/**
+ * Implementation of hook_nodeapi
+ *
+ * We need to clear the cache to cover the case where file attachments have changed, but
+ * the body hasn't. This might be a little aggressive, in that we clear the cache for any node
+ * with attachments, but since this only occurs during editing or creating the load should be
+ * pretty minimal.
+ */
+function tableofcontents_nodeapi(&$node, $op, $a3 = NULL, $a4 = NULL) {
+  switch ($op) {
+  case 'prepare':
+    if (isset($node->files)) {
+      // Remove the cached version if there are attachments on this node
+      $cid = $node->format . ':' . md5($node->body);
+      cache_clear_all($cid, 'cache_filter');
+    }
+    break;
+
+  case 'presave':
+    if (variable_get('tableofcontents_remove_teaser_' . $node->format, TRUE)) {
+      module_load_include('admin.inc', 'tableofcontents');
+      _tableofcontents_hide_in_teaser($node);
+    }
+    break;
+
+  }
+}
+
+/**
+ * Implementation of hook_theme
+ *
+ * @return
+ *   Array of theme hooks this module implements.
+ */
+function tableofcontents_theme() {
+  return array(
+    'tableofcontents_toc' => array(
+      'arguments' => array(
+        'toc' => NULL,
+      ),
+      'file' => 'tableofcontents.pages.inc',
+    ),
+    'tableofcontents_number' => array(
+      'arguments' => array(
+        'toc' => NULL,
+      ),
+      'file' => 'tableofcontents.pages.inc',
+    ),
+  );
+}

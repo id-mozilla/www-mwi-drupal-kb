@@ -1,0 +1,10 @@
+<?php
+/* $Id: tableofcontents.install,v 1.1.2.2 2009/09/17 17:19:11 alexiswilke Exp $ */
+
+/**
+ * Implementation of hook_uninstall()
+ */
+function tableofcontents_uninstall() {
+  db_query("DELETE FROM {variable} WHERE name LIKE 'tableofcontents_%'");
+}
+

@@ -1,0 +1,11 @@
+; $Id: shared_edit.info,v 1.1 2009/06/18 03:36:23 mfer Exp $
+name = Shared Edit
+description = Choose a list of users who can edit a node.
+core = 6.x
+
+; Information added by drupal.org packaging script on 2009-06-18
+version = "6.x-1.1"
+core = "6.x"
+project = "shared_edit"
+datestamp = "1245332530"
+

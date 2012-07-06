@@ -1,0 +1,49 @@
+<?php
+// $Id: shared_edit.install,v 1.1 2009/06/18 03:36:23 mfer Exp $
+/**
+ * @file
+ * Contains the install function for Shared Edit.
+ */
+
+/**
+ * Implementation of hook_install().
+ */
+function shared_edit_install() {
+  drupal_install_schema('shared_edit');
+}
+
+/**
+ * Implementation of hook_uninstall().
+ */
+function shared_edit_uninstall() {
+  drupal_uninstall_schema('shared_edit');
+  db_query("DELETE FROM {variable} WHERE name LIKE 'shared_edit_%'");
+}
+
+/**
+ * Implementation of hook_schema().
+ */
+function shared_edit_schema() {
+  $schema = array();
+  $schema['shared_edit'] = array(
+    'description' => 'Stores the users who can edit nodes.',
+    'fields' => array(
+      'nid' => array(
+        'description' => 'The node id.',
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+      ),
+      'uid' => array(
+        'description' => 'The user id for the user who can edit the node.',
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+      ),
+    ),
+    'unique keys' => array(
+      'nid' => array('nid', 'uid'),
+    ),
+  );
+  return $schema;
+}
